@@ -4,3 +4,6 @@ numpy
 matplotlib
 scikit-learn
 joblib
+reportlab
+python-dateutil
+chardet
