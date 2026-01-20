@@ -5,9 +5,13 @@ from sklearn.preprocessing import LabelEncoder
 
 def train_product_forecast_model(df):
     """
-    Trains ONE RandomForest model for product-wise sales forecasting.
-    Uses Date + Product grouped daily sales and feature engineering.
-    Returns trained model and LabelEncoder.
+    Train ONE RandomForest model for product-wise forecasting.
+
+    Steps:
+    1) Group by Date + Product
+    2) Feature engineering (DayIndex, DayOfWeek, Month)
+    3) Encode Product using LabelEncoder
+    4) Train RandomForestRegressor
     """
 
     # Group by Date and Product (daily product sales)
@@ -27,7 +31,7 @@ def train_product_forecast_model(df):
     X = product_daily[["DayIndex", "DayOfWeek", "Month", "Product_Encoded"]]
     y = product_daily["Total_Sales"]
 
-    # Train model
+    # Train model (faster + uses all CPU cores)
     model = RandomForestRegressor(
         n_estimators=200,
         random_state=42,
@@ -40,12 +44,15 @@ def train_product_forecast_model(df):
 
 def predict_product_future_sales(df, model, le, future_days, selected_product=None):
     """
-    Predicts future sales for:
+    Predict future sales for:
     - All products (if selected_product is None)
     - OR a single product (if selected_product is given)
 
-    IMPORTANT CHANGE:
-    Future dates will start from TOMORROW (real-time), not from dataset last date.
+    IMPORTANT:
+    - Future dates start from TOMORROW (real-time date)
+    - Predicted sales are rounded to 2 decimals
+    - Negative predictions are clipped to 0
+    - Unseen products are skipped safely
     """
 
     products = df["Product"].unique() if selected_product is None else [selected_product]
@@ -54,12 +61,12 @@ def predict_product_future_sales(df, model, le, future_days, selected_product=No
     # Encoder known products
     encoder_products = set(le.classes_)
 
-    # Real-time start date (tomorrow)
+    # Real-time start date (tomorrow onwards)
     start_date = pd.Timestamp.today().normalize()
     future_dates = pd.date_range(start_date + pd.Timedelta(days=1), periods=future_days)
 
     for product in products:
-        # Skip unseen product labels (avoid crash)
+        # Skip unseen products to avoid error
         if product not in encoder_products:
             continue
 
@@ -80,6 +87,7 @@ def predict_product_future_sales(df, model, le, future_days, selected_product=No
             "Product": product
         })
 
+        # Feature engineering for future dates
         future_df["DayIndex"] = future_index
         future_df["DayOfWeek"] = future_df["Date"].dt.dayofweek
         future_df["Month"] = future_df["Date"].dt.month
@@ -87,7 +95,12 @@ def predict_product_future_sales(df, model, le, future_days, selected_product=No
 
         # Predict
         preds = model.predict(future_df[["DayIndex", "DayOfWeek", "Month", "Product_Encoded"]])
-        future_df["Predicted_Sales"] = preds
+
+        # ✅ Make predicted values understandable
+        future_df["Predicted_Sales"] = preds.round(2)
+
+        # ✅ Remove negative predictions (sales can't be negative)
+        future_df["Predicted_Sales"] = future_df["Predicted_Sales"].clip(lower=0)
 
         all_predictions.append(future_df[["Date", "Product", "Predicted_Sales"]])
 
